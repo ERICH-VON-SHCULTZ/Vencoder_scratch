@@ -1,0 +1,62 @@
+Using device: cuda
+✓ W&B initialized: https://wandb.ai/pichenygroup/vit-small-finally-working/runs/jmdop37j
+============================================================
+Creating Dataloaders (90% train / 10% val)
+============================================================
+
+[1/2] Creating training dataset...
+Building image index from /scratch/qz2086/fall2025_finalproject/data/part*...
+  Indexing part1... 100,000 images
+  Indexing part2... 100,000 images
+  Indexing part3... 100,000 images
+  Indexing part4... 100,000 images
+  Indexing part5... 100,000 images
+
+✓ Total images found: 500,000
+Creating train split... 450,000 images
+
+============================================================
+Dataset ready:
+  Split: Train (90%)
+  Images: 450,000
+  Disk usage: 0 bytes extra (using existing files)
+============================================================
+
+
+[2/2] Creating validation dataset...
+Building image index from /scratch/qz2086/fall2025_finalproject/data/part*...
+  Indexing part1... 100,000 images
+  Indexing part2... 100,000 images
+  Indexing part3... 100,000 images
+  Indexing part4... 100,000 images
+  Indexing part5... 100,000 images
+
+✓ Total images found: 500,000
+Creating val split... 50,000 images
+
+============================================================
+Dataset ready:
+  Split: Val (10%)
+  Images: 50,000
+  Disk usage: 0 bytes extra (using existing files)
+============================================================
+
+
+============================================================
+Dataloaders Ready!
+============================================================
+Train batches per epoch: 1,171
+Val batches per epoch: 130
+============================================================
+
+Model parameters: 21.42M
+
+============================================================
+Model Summary
+============================================================
+Total parameters: 27,460,224 (27.46M)
+Trainable parameters: 27,458,176 (27.46M)
+Non-trainable parameters: 2,048
+============================================================
+
+Model parameters: 21.42M

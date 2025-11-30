@@ -1,0 +1,4 @@
+# Ignore all directories
+*/
+
+!__pycache__/
