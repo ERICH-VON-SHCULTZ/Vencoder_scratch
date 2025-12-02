@@ -1,4 +1,4 @@
-# Ignore all directories
-*/
-
-!__pycache__/
+\data
+\checkpoints
+\hf_cache
+\__pycache__
