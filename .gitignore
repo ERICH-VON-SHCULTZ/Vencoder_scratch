@@ -2,5 +2,5 @@
 \checkpoints
 \hf_cache
 \__pycache__
-.err
-.out
+*.err
+*.out
