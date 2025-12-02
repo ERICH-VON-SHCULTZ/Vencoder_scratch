@@ -423,7 +423,7 @@ def main(args):
     base_lr = args.lr
 
     lr_schedule = cosine_scheduler(
-        base_lr,
+        args.lr * (args.batch_size * args.world_size) / 256.,  # Linear scaling rule
         args.min_lr,
         args.epochs,
         niter_per_ep,

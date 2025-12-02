@@ -8,7 +8,6 @@ import os
 import zipfile
 from huggingface_hub import hf_hub_download
 from tqdm import tqdm
-import shutil
 
 def download_and_extract_dataset(output_dir="./data", cache_dir="./hf_cache"):
     """
@@ -75,47 +74,7 @@ def download_and_extract_dataset(output_dir="./data", cache_dir="./hf_cache"):
     return extracted_dirs
 
 
-def merge_parts(output_dir="./data", merged_dir="./data/train"):
-    """
-    Merge all extracted parts into a single directory.
-    """
-    print(f"\n{'='*60}")
-    print("Merging dataset parts...")
-    print(f"{'='*60}")
-    
-    os.makedirs(merged_dir, exist_ok=True)
-    
-    # Find all part directories
-    parts = sorted([d for d in os.listdir(output_dir) if d.startswith('part')])
-    
-    total_files = 0
-    
-    for part in tqdm(parts, desc="Merging parts"):
-        part_dir = os.path.join(output_dir, part)
-        
-        # Find all image files in this part
-        for root, dirs, files in os.walk(part_dir):
-            for file in files:
-                if file.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
-                    src = os.path.join(root, file)
-                    dst = os.path.join(merged_dir, f"{part}_{file}")
-                    shutil.copy2(src, dst)
-                    total_files += 1
-    
-    print(f"\n✓ Merged {total_files} images into {merged_dir}")
-    
-    return merged_dir
-
 
 if __name__ == "__main__":
     # Download and extract
     extracted = download_and_extract_dataset()
-    
-    # Merge into single directory
-    if extracted:
-        merged = merge_parts()
-        print(f"\n{'='*60}")
-        print("Dataset ready for training!")
-        print(f"{'='*60}")
-        print(f"Location: {merged}")
-        print("\nNext: Use fast_dataloader.py to load this data")
