@@ -13,7 +13,173 @@ from tqdm import tqdm
 import os
 import logging
 import wandb
+import math
 
+
+
+class iBOTLoss(nn.Module):
+    def __init__(self, out_dim, patch_out_dim, ngcrops, nlcrops, warmup_teacher_temp, 
+                 teacher_temp, warmup_teacher_temp_epochs, nepochs, student_temp=0.1, 
+                 center_momentum=0.9, center_momentum2=0.9,
+                 lambda1=1.0, lambda2=1.0):
+        super().__init__()
+        self.student_temp = student_temp
+        self.center_momentum = center_momentum
+        self.center_momentum2 = center_momentum2
+        self.ngcrops = ngcrops
+        self.nlcrops = nlcrops
+        self.ncrops = ngcrops + nlcrops
+        self.register_buffer("center", torch.zeros(1, out_dim))
+        self.register_buffer("center2", torch.zeros(1, 1, patch_out_dim))
+        self.lambda1 = lambda1 # CLS loss weight
+        self.lambda2 = lambda2 # MIM loss weight
+
+        # Teacher temperature schedule
+        self.teacher_temp_schedule = np.concatenate((
+            np.linspace(warmup_teacher_temp, teacher_temp, warmup_teacher_temp_epochs),
+            np.ones(nepochs - warmup_teacher_temp_epochs) * teacher_temp
+        ))
+
+    def forward(self, student_output, teacher_output, student_masks, epoch):
+        """
+        student_output: (student_cls, student_patch)
+        teacher_output: (teacher_cls, teacher_patch)
+        student_masks: List of masks for global crops
+        """
+        student_cls, student_patch = student_output
+        teacher_cls, teacher_patch = teacher_output
+        
+        # --- 1. CLS Token Loss (DINO Logic) ---
+        student_cls = student_cls / self.student_temp
+        student_cls_c = student_cls.chunk(self.ncrops)
+        
+        # Teacher centering and sharpening
+        temp = self.teacher_temp_schedule[epoch]
+        teacher_cls_c = F.softmax((teacher_cls - self.center) / temp, dim=-1)
+        teacher_cls_c = teacher_cls_c.detach().chunk(self.ngcrops)
+
+        total_loss1 = 0
+        n_loss_terms1 = 0
+        
+        # Global crops logic
+        for iq, q in enumerate(teacher_cls_c):
+            for v in range(len(student_cls_c)):
+                if v == iq: continue # Skip same view
+                
+                loss = torch.sum(-q * F.log_softmax(student_cls_c[v], dim=-1), dim=-1)
+                total_loss1 += loss.mean()
+                n_loss_terms1 += 1
+        
+        total_loss1 = total_loss1 / n_loss_terms1 * self.lambda1
+
+        # --- 2. Patch Token Loss (MIM Logic) ---
+        # iBOT only calculates MIM loss on Global Crops
+        total_loss2 = 0
+        n_loss_terms2 = 0
+        
+        # Teacher patches: Center + Sharpen
+        teacher_patch_c = F.softmax((teacher_patch - self.center2) / temp, dim=-1)
+        teacher_patch_c = teacher_patch_c.detach().chunk(self.ngcrops)
+        
+        # Student patches: Apply Temp
+        student_patch = student_patch / self.student_temp
+        student_patch_c = student_patch.chunk(self.ngcrops) # Only global crops pass through patch head
+
+        for iq, q in enumerate(teacher_patch_c):
+            for v in range(len(student_patch_c)):
+                if v == iq:
+                    # MIM Loss: Compare Student(Masked View v) vs Teacher(Original View v)
+                    # We only care about masked positions
+                    loss = torch.sum(-q * F.log_softmax(student_patch_c[v], dim=-1), dim=-1)
+                    
+                    # mask shape: [B, N] -> flatten to match token sequence
+                    mask = student_masks[v]
+                    
+                    # Compute mean loss ONLY on masked tokens
+                    loss = torch.sum(loss * mask.float(), dim=-1) / mask.sum(dim=-1).clamp(min=1.0)
+                    total_loss2 += loss.mean()
+                    n_loss_terms2 += 1
+
+        total_loss2 = total_loss2 / n_loss_terms2 * self.lambda2
+
+        self.update_center(teacher_cls, teacher_patch)
+        
+        return total_loss1 + total_loss2, total_loss1.item(), total_loss2.item()
+
+    @torch.no_grad()
+    def update_center(self, teacher_cls, teacher_patch):
+        # Update CLS center
+        batch_center = torch.sum(teacher_cls, dim=0, keepdim=True)
+        # dist.all_reduce(batch_center) # If using multi-gpu distributed
+        batch_center = batch_center / len(teacher_cls)
+        self.center = self.center * self.center_momentum + batch_center * (1 - self.center_momentum)
+
+        # Update Patch center
+        # Average over batch AND spatial dimensions
+        patch_center = torch.sum(teacher_patch.mean(1), dim=0, keepdim=True)
+        # dist.all_reduce(patch_center) # If using multi-gpu distributed
+        patch_center = patch_center / len(teacher_patch)
+        self.center2 = self.center2 * self.center_momentum2 + patch_center * (1 - self.center_momentum2)
+
+class MaskingGenerator:
+    def __init__(self, input_size, num_masking_patches, min_num_patches=4, max_num_patches=None,
+                 min_aspect=0.3, max_aspect=None):
+        if not isinstance(input_size, tuple):
+            input_size = (input_size, ) * 2
+        self.height, self.width = input_size
+
+        self.num_patches = self.height * self.width
+        self.num_masking_patches = num_masking_patches
+
+        self.min_num_patches = min_num_patches
+        self.max_num_patches = num_masking_patches if max_num_patches is None else max_num_patches
+
+        max_aspect = max_aspect or 1/min_aspect
+        self.log_aspect_ratio = (math.log(min_aspect), math.log(max_aspect))
+
+    def __repr__(self):
+        repr_str = "Generator(%d, %d -> [%d ~ %d], max = %d, %.3f ~ %.3f)" % (
+            self.height, self.width, self.min_num_patches, self.max_num_patches,
+            self.num_masking_patches, self.log_aspect_ratio[0], self.log_aspect_ratio[1])
+        return repr_str
+
+    def get_shape(self):
+        return self.height, self.width
+
+    def __call__(self):
+        mask = np.zeros(self.get_shape(), dtype=int)
+        mask_count = 0
+        while mask_count < self.num_masking_patches:
+            max_mask_patches = self.num_masking_patches - mask_count
+            max_mask_patches = min(max_mask_patches, self.max_num_patches)
+
+            delta = 0
+            for attempt in range(10):
+                target_area = np.random.uniform(self.min_num_patches, max_mask_patches)
+                aspect_ratio = math.exp(np.random.uniform(*self.log_aspect_ratio))
+                h = int(round(math.sqrt(target_area * aspect_ratio)))
+                w = int(round(math.sqrt(target_area / aspect_ratio)))
+                if w < self.width and h < self.height:
+                    top = np.random.randint(0, self.height - h)
+                    left = np.random.randint(0, self.width - w)
+
+                    num_masked = mask[top: top + h, left: left + w].sum()
+                    # Overlap
+                    if 0 < h * w - num_masked <= max_mask_patches:
+                        for i in range(top, top + h):
+                            for j in range(left, left + w):
+                                if mask[i, j] == 0:
+                                    mask[i, j] = 1
+                                    delta += 1
+
+                    if delta > 0:
+                        break
+            if delta == 0:
+                break
+            else:
+                mask_count += delta
+        
+        return mask # Returns (H, W) mask
 
 def setup_logging(log_dir="./logs"):
     """Setup logging configuration."""
@@ -329,7 +495,7 @@ def init_wandb(args, project_name="ssl-competition"):
         wandb run object
     """
     # Create run name
-    run_name = f"dino_vit_patch{args.patch_size}_bs{args.batch_size}_lr{args.lr}_ep{args.epochs}"
+    run_name = f"ibot_vit_patch{args.patch_size}_bs{args.batch_size}_lr{args.lr}_ep{args.epochs}"
     
     # Initialize W&B
     run = wandb.init(

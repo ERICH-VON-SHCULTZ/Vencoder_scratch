@@ -386,7 +386,27 @@ def main(args):
     teacher = MultiCropWrapper(teacher_backbone, teacher_head)
     teacher = teacher.to(device)
     
+    if args.pretrained_weights:
+        if os.path.isfile(args.pretrained_weights):
+            logger.info(f"==> Loading pretrained weights from: {args.pretrained_weights}")
+            checkpoint = torch.load(args.pretrained_weights, map_location='cpu')
+            
+            # Handle dictionary checkpoints (typical save format) vs raw state_dict
+            if 'model_state_dict' in checkpoint:
+                state_dict = checkpoint['model_state_dict']
+            else:
+                state_dict = checkpoint
+            
+            # Load into student
+            # strict=True ensures we are loading into the exact same architecture
+            msg = student.load_state_dict(state_dict, strict=True)
+            logger.info(f"==> Loaded weights successfully. Message: {msg}")
+        else:
+            logger.warning(f"!! Pretrained weights file not found: {args.pretrained_weights}")
+            logger.warning("!! Continuing with random initialization...")
+    
     # Initialize teacher with student weights
+    # Note: If we loaded pretrained weights above, this will sync them to teacher too.
     teacher.load_state_dict(student.state_dict())
     
     # Teacher has no gradients
@@ -455,9 +475,11 @@ def main(args):
     # Mixed precision scaler
     scaler = GradScaler()
     
-    # Resume from checkpoint
+    # Resume from checkpoint (Full State)
+    # Note: This logic overrides --pretrained_weights if both are present
     start_epoch = 0
     if args.resume:
+        logger.info(f"==> Resuming full training state from: {args.resume}")
         start_epoch = load_checkpoint(
             args.resume,
             student,
@@ -674,7 +696,10 @@ if __name__ == "__main__":
     parser.add_argument('--num_workers', default=8, type=int, help='Number of data loading workers')
     parser.add_argument('--seed', default=42, type=int, help='Random seed')
     parser.add_argument('--world_size', default=1, type=int, help='Number of GPUs')
-    parser.add_argument('--resume', default='', type=str, help='Resume from checkpoint')
+
+    parser.add_argument('--pretrained_weights', default='', type=str, help='Path to pretrained model weights (starts from epoch 0)')
+    parser.add_argument('--resume', default='', type=str, help='Resume full training state (optimizer + epoch)')
+    
     parser.add_argument('--evaluate', action='store_true', help='Run k-NN evaluation after training')
     parser.add_argument('--val_freq', default=5, type=int, help='Validation frequency (epochs)')
     parser.add_argument('--save_freq', default=10, type=int, help='Save frequency (epochs)')

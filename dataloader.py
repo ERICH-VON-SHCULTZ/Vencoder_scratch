@@ -30,63 +30,63 @@ class Solarization:
         return ImageOps.solarize(x, self.threshold)
 
 
-# class DINOAugmentation:
-#     def __init__(self, n_local_crops=6, image_size=96):
-#         self.n_local_crops = n_local_crops
-#         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        
-#         self.global_transform = transforms.Compose([
-#             transforms.RandomResizedCrop(image_size, scale=(0.4, 1.0),
-#                                         interpolation=transforms.InterpolationMode.BICUBIC),
-#             transforms.RandomHorizontalFlip(p=0.5),
-#             transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)], p=0.8),
-#             transforms.RandomGrayscale(p=0.2),
-#             GaussianBlur(sigma=[0.1, 2.0]),
-#             transforms.ToTensor(),
-#             normalize
-#         ])
-        
-#         self.local_transform = transforms.Compose([
-#             transforms.RandomResizedCrop(image_size, scale=(0.05, 0.4),
-#                                         interpolation=transforms.InterpolationMode.BICUBIC),
-#             transforms.RandomHorizontalFlip(p=0.5),
-#             transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)], p=0.8),
-#             transforms.RandomGrayscale(p=0.2),
-#             GaussianBlur(sigma=[0.1, 2.0]),
-#             transforms.RandomApply([Solarization(threshold=128)], p=0.2),
-#             transforms.ToTensor(),
-#             normalize
-#         ])
-    
-#     def __call__(self, image):
-#         crops = [self.global_transform(image), self.global_transform(image)]
-#         crops.extend([self.local_transform(image) for _ in range(self.n_local_crops)])
-#         return crops
-
-
 class DINOAugmentation:
     def __init__(self, n_local_crops=6, image_size=96):
         self.n_local_crops = n_local_crops
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         
-        # --- MODIFIED: NO AUGMENTATION ---
-        # Only uses a fixed resize and normalization.
-        self.base_transform = transforms.Compose([
-            # Use deterministic Resize/CenterCrop to get a single view
-            transforms.Resize(image_size), 
-            transforms.CenterCrop(image_size),
+        self.global_transform = transforms.Compose([
+            transforms.RandomResizedCrop(image_size, scale=(0.4, 1.0),
+                                        interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)], p=0.8),
+            transforms.RandomGrayscale(p=0.2),
+            GaussianBlur(sigma=[0.1, 2.0]),
             transforms.ToTensor(),
             normalize
         ])
         
-        # All transforms are now identical (No Augmentation)
-        self.global_transform = self.base_transform
-        self.local_transform = self.base_transform
+        self.local_transform = transforms.Compose([
+            transforms.RandomResizedCrop(image_size, scale=(0.05, 0.4),
+                                        interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)], p=0.8),
+            transforms.RandomGrayscale(p=0.2),
+            GaussianBlur(sigma=[0.1, 2.0]),
+            transforms.RandomApply([Solarization(threshold=128)], p=0.2),
+            transforms.ToTensor(),
+            normalize
+        ])
     
     def __call__(self, image):
         crops = [self.global_transform(image), self.global_transform(image)]
         crops.extend([self.local_transform(image) for _ in range(self.n_local_crops)])
         return crops
+
+
+# class DINOAugmentation:
+#     def __init__(self, n_local_crops=6, image_size=96):
+#         self.n_local_crops = n_local_crops
+#         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        
+#         # --- MODIFIED: NO AUGMENTATION ---
+#         # Only uses a fixed resize and normalization.
+#         self.base_transform = transforms.Compose([
+#             # Use deterministic Resize/CenterCrop to get a single view
+#             transforms.Resize(image_size), 
+#             transforms.CenterCrop(image_size),
+#             transforms.ToTensor(),
+#             normalize
+#         ])
+        
+#         # All transforms are now identical (No Augmentation)
+#         self.global_transform = self.base_transform
+#         self.local_transform = self.base_transform
+    
+#     def __call__(self, image):
+#         crops = [self.global_transform(image), self.global_transform(image)]
+#         crops.extend([self.local_transform(image) for _ in range(self.n_local_crops)])
+#         return crops
 
 
 class EfficientMultiPartDataset(Dataset):
